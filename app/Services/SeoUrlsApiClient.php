@@ -16,12 +16,12 @@ class SeoUrlsApiClient
 
         $slugs = $this->getOnlySlugs($articleSlugWithId);
 
-        // API яндекса надо передать только слаги
+        // API яндекса надо передать только слаги (массив строк)
         $this->getYandexApiClient()->post('/update-slugs', [
             'list' => $slugs,
         ]);
 
-        // API яндекса надо передать слаги и id статей
+        // API яндекса надо передать слаги и id статей (слаг статьи -> идентификатор статьи)
         $this->getGoogleApiClient()->post('/update-slugs-by-id', [
             'list' => $articleSlugWithId,
         ]);
