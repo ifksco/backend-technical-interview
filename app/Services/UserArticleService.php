@@ -11,11 +11,12 @@ class UserArticleService
 {
     public function create(array $data, User $user)
     {
-        $userArticle           = new UserArticle();
-        $userArticle->user_id  = $user->id;
-        $userArticle->seo_slug = $data['seo_slug'];
-        $userArticle->title    = $data['title'];
-        $userArticle->content  = $data['content'];
+        $userArticle = UserArticle::create([
+            'user_id'  => $user->id,
+            'seo_slug' => $data['seo_slug'],
+            'title'    => $data['title'],
+            'content'  => $data['content'],
+        ]);
 
         DB::transaction(function () use ($userArticle) {
             $userArticle->saveOrFail();
