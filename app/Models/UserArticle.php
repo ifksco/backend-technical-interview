@@ -26,7 +26,6 @@ class UserArticle extends Model
     ];
 
     protected $fillable = [
-        'user_id',
         'title',
         'seo_slug',
         'content',
