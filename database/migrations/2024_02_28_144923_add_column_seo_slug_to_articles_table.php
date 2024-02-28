@@ -25,7 +25,7 @@ return new class extends Migration {
     public function down(): void
     {
         Schema::table('articles', function (Blueprint $table) {
-            $table->dropIfExists('seo_slug');
+            $table->drop('seo_slug');
         });
     }
 };
