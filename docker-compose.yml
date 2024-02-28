@@ -1,117 +1,127 @@
 version: '3.9'
 
-services:
-  php:
-
-
-  laravel.test:
-    build:
-      context: ./vendor/laravel/sail/runtimes/8.3
-      dockerfile: Dockerfile
-      args:
-        WWWGROUP: '${WWWGROUP}'
-    image: sail-8.3/app
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
-    ports:
-      - '${APP_PORT:-80}:80'
-      - '${VITE_PORT:-5173}:${VITE_PORT:-5173}'
-    environment:
-      WWWUSER: '${WWWUSER}'
-      LARAVEL_SAIL: 1
-      XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
-      XDEBUG_CONFIG: '${SAIL_XDEBUG_CONFIG:-client_host=host.docker.internal}'
-      IGNITION_LOCAL_SITES_PATH: '${PWD}'
-    volumes:
-      - '.:/var/www/html'
-    networks:
-      - sail
-    depends_on:
-      - mysql
-      - redis
-      - meilisearch
-      - mailpit
-      - selenium
-  mysql:
-    image: 'mysql/mysql-server:8.0'
-    ports:
-      - '${FORWARD_DB_PORT:-3306}:3306'
-    environment:
-      MYSQL_ROOT_PASSWORD: '${DB_PASSWORD}'
-      MYSQL_ROOT_HOST: '%'
-      MYSQL_DATABASE: '${DB_DATABASE}'
-      MYSQL_USER: '${DB_USERNAME}'
-      MYSQL_PASSWORD: '${DB_PASSWORD}'
-      MYSQL_ALLOW_EMPTY_PASSWORD: 1
-    volumes:
-      - 'sail-mysql:/var/lib/mysql'
-      - './vendor/laravel/sail/database/mysql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh'
-    networks:
-      - sail
-    healthcheck:
-      test:
-        - 'CMD'
-        - 'mysqladmin'
-        - 'ping'
-        - '-p${DB_PASSWORD}'
-      retries: 3
-      timeout: 5s
-  redis:
-    image: 'redis:alpine'
-    ports:
-      - '${FORWARD_REDIS_PORT:-6379}:6379'
-    volumes:
-      - 'sail-redis:/data'
-    networks:
-      - sail
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      retries: 3
-      timeout: 5s
-  meilisearch:
-    image: 'getmeili/meilisearch:latest'
-    ports:
-      - '${FORWARD_MEILISEARCH_PORT:-7700}:7700'
-    environment:
-      MEILI_NO_ANALYTICS: '${MEILISEARCH_NO_ANALYTICS:-false}'
-    volumes:
-      - 'sail-meilisearch:/meili_data'
-    networks:
-      - sail
-    healthcheck:
-      test:
-        - CMD
-        - wget
-        - '--no-verbose'
-        - '--spider'
-        - 'http://localhost:7700/health'
-      retries: 3
-      timeout: 5s
-  mailpit:
-    image: 'axllent/mailpit:latest'
-    ports:
-      - '${FORWARD_MAILPIT_PORT:-1025}:1025'
-      - '${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
-    networks:
-      - sail
-  selenium:
-    image: selenium/standalone-chrome
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
-    volumes:
-      - '/dev/shm:/dev/shm'
-    networks:
-      - sail
-networks:
-  sail:
-    driver: bridge
 volumes:
-  sail-mysql:
+  redis:
     driver: local
-  sail-redis:
+  mysql:
     driver: local
-  sail-meilisearch:
-    driver: local
+
+networks:
+  ti-network:
+    driver: bridge
+
+services:
+  nginx:
+    container_name: ti-nginx
+    image: nginx:alpine
+    restart: on-failure
+    depends_on:
+      - php
+    environment:
+      NGINX_SERVER_NAME: ${APP_DOMAIN:-zb-technical-interview.local}
+      NGINX_USE_HTTPS: ${NGINX_USE_HTTPS:-off}
+    ports:
+      - ${APP_LOCAL_PORT:-80}:${APP_DOCKER_PORT:-80}
+    volumes:
+      - $PWD/docker/nginx/templates:/etc/nginx/templates
+      - $PWD:/var/www/html
+    networks:
+      - ti-network
+
+  php:
+    container_name: ti-php
+    build:
+      context: $PWD/docker/php
+      target: php_app
+      args:
+        - GROUP_ID=${DOCKER_GROUP_ID}
+        - USER_ID=${DOCKER_USER_ID}
+    restart: on-failure
+    depends_on:
+      mysql:
+        condition: service_started
+      redis:
+        condition: service_started
+    volumes:
+      - $PWD/docker/php/conf/php.ini:/usr/local/etc/php/conf.d/docker.ini
+      - $PWD:/var/www/html
+    environment:
+      XDEBUG_CONFIG: "remote_host=${XDEBUG_REMOTE_HOST:-php} client_host=${XDEBUG_CLIENT_HOST:-host.docker.internal} remote_enable=1"
+      PHP_IDE_CONFIG: "serverName=${PHP_IDE_CONFIG_SERVER_NAME}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ti-network
+
+  mysql:
+    container_name: ti-mysql
+    image: mysql:8.0
+    restart: on-failure
+    ports:
+      - ${DB_LOCAL_PORT:-3306}:${DB_DOCKER_PORT:-3306}
+    environment:
+      MYSQL_HOST: ${DB_HOST}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      SERVICE_TAGS: dev
+      SERVICE_NAME: mysql
+      TZ: Europe/Moscow
+    volumes:
+      - mysql:/var/lib/mysql
+      - $PWD/storage/app/mysql:/app/mysql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-p${DB_PASSWORD}" ]
+      retries: 3
+      timeout: 5s
+    networks:
+      - ti-network
+
+  redis:
+    container_name: ti-redis
+    image: redis:alpine
+    restart: on-failure
+    ports:
+      - ${REDIS_LOCAL_PORT:-6379}:${REDIS_DOCKER_PORT:-6379}
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      retries: 3
+      timeout: 5s
+    networks:
+      - ti-network
+
+  supervisor:
+    build:
+      context: $PWD/docker/php
+      target: php_supervisor
+      args:
+        - GROUP_ID=${DOCKER_GROUP_ID}
+        - USER_ID=${DOCKER_USER_ID}
+    container_name: ti-supervisor
+    volumes:
+      - $PWD:/var/www/html
+      - $PWD/docker/supervisor/conf/supervisor.conf:/etc/supervisor/conf.d/supervisord.conf
+      - $PWD/docker/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    command: [ "sh", "-c", "supervisord -n" ]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mysql:
+        condition: service_started
+      redis:
+        condition: service_started
+    networks:
+      - ti-network
+
+  mailhog:
+    container_name: ti-mailhog
+    image: mailhog/mailhog
+    logging:
+      driver: 'none'  # disable saving logs
+    ports:
+      - ${MAIL_LOCAL_PORT:-1025}:${MAIL_DOCKER_PORT:-1025} # smtp server
+      - ${MAILHOG_UI_LOCAL_PORT:-8025}:${MAILHOG_UI_DOCKER_PORT:-8025} # web ui
+    networks:
+      - ti-network
